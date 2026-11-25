@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestión masiva de luminarias</title>
+  <style>
+    :root{--ink:#17203a;--muted:#69738d;--bg:#f4f7fb;--card:#fff;--brand:#3658e3;--line:#dfe5ef;--ok:#158466}
+    *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+    header{height:72px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 32px;justify-content:space-between}
+    header strong{font-size:20px}.status{font-size:13px;color:var(--ok);background:#edf8f5;padding:8px 12px;border-radius:20px}
+    main{max-width:1500px;margin:auto;padding:28px}.grid{display:grid;grid-template-columns:360px minmax(0,1fr);gap:20px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 8px 28px #1b2a4a0b}
+    .step{display:flex;gap:10px;align-items:center;margin-bottom:16px}.step span{width:28px;height:28px;border-radius:50%;background:var(--brand);color:white;display:grid;place-items:center;font-weight:700}
+    label{display:block;font-size:13px;font-weight:700;margin:14px 0 7px}input,select,textarea,button{font:inherit} input,select,textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:#fff}
+    textarea{min-height:70px}.drop{border:2px dashed #bac5db;border-radius:12px;padding:28px;text-align:center;color:var(--muted);cursor:pointer;background:#fafbfe}.drop.drag{border-color:var(--brand);background:#f2f5ff}
+    .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}.photo{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}.photo img{width:100%;height:200px;object-fit:cover;background:#e8edf5}.photo-body{padding:12px}.mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.mini-grid label{margin:4px 0}
+    .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}.primary{border:0;border-radius:9px;padding:11px 16px;background:var(--brand);color:white;font-weight:700}.secondary{border:1px solid var(--line);border-radius:9px;padding:11px 16px;background:white;font-weight:700}
+    table{width:100%;border-collapse:collapse;font-size:12px}th,td{border-bottom:1px solid var(--line);padding:9px;text-align:left;white-space:nowrap}th{color:var(--muted);background:#fafbfe}.badge{border-radius:12px;padding:3px 7px;font-size:11px;background:#eef2f8}.badge.ok{background:#daf3e9;color:#087d60}.badge.warn{background:#fff1d6;color:#985a00}
+    .table-wrap{overflow:auto}.empty{color:var(--muted);text-align:center;padding:50px 10px}@media(max-width:900px){.grid{grid-template-columns:1fr}header{padding:0 16px}.status{display:none}}
+  </style>
+</head>
+<body>
+<header><strong>Gestión masiva de luminarias</strong><div class="status">{{censo_count}} stickers cargados</div></header>
+<main>
+  <div class="grid">
+    <aside class="card">
+      <div class="step"><span>1</span><strong>Datos del recorrido</strong></div>
+      <label>Transformador principal</label><input id="transformador" value="" placeholder="Ej. 1T00459">
+      <label>Municipio predeterminado</label><input id="municipio" value="" placeholder="Ej. CÚCUTA">
+      <label>Ubicación</label><input id="ubicacion" value="" placeholder="Se completa al reconocer una dirección en la foto">
+      <label>Fecha</label><input id="fecha" type="date">
+      <label>Clasificación</label><select id="clasificacion"><option>URBANO</option><option>RURAL</option></select>
+      <label>Observaciones</label><textarea id="observaciones" placeholder="AP-AFORO"></textarea>
+
+      <div class="step" style="margin-top:24px"><span>2</span><strong>Fotos del circuito</strong></div>
+      <div class="drop" id="drop">Arrastra aquí cualquier carpeta de fotos<br><small>o haz clic y selecciona una carpeta completa</small></div>
+      <input id="photos" type="file" accept=".jpg,.jpeg,image/jpeg" multiple>
+    </aside>
+
+    <section>
+      <div class="card">
+        <div class="step"><span>3</span><strong>Asignación por foto</strong></div>
+        <div class="photos" id="photosList"><div class="empty">Aún no hay fotos cargadas</div></div>
+        <div class="actions"><button class="primary" id="process">Procesar luminarias</button></div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <div class="step"><span>4</span><strong>Resultados y exportación</strong></div>
+        <div class="table-wrap" id="results"><div class="empty">Los datos procesados aparecerán aquí­</div></div>
+        <div class="actions"><button class="secondary" id="export" disabled>Descargar TXT UTF-8 con BOM</button></div>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+const drop=document.getElementById('drop'), input=document.getElementById('photos'), list=document.getElementById('photosList');
+let photos=[], resultRows=[];
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function photoCard(p,i){return `<div class="photo"><img src="${esc(p.url)}" alt="Foto"><div class="photo-body"><strong>${esc(p.name)}</strong><div class="mini-grid"><label>Código sticker<input class="sticker" data-i="${i}" value="${esc(p.sticker||'')}" placeholder="Ej. 1900679"></label><label>Potencia<input class="potencia" data-i="${i}" value="${esc(p.potencia||'')}" placeholder="Ej. 35"></label><label>Tecnología<select class="tipo" data-i="${i}"><option LED>LED</option><option MH>MH</option><option SODIO>SODIO</option><option LED REFLECTOR>LED REFLECTOR</option></select></label><label>Farola<input class="farola" data-i="${i}" value="${esc(p.farola||'')}" readonly></label></div></div></div>`}
+function render(){list.innerHTML=photos.length?photos.map(photoCard).join(''):`<div class="empty">Aún no hay fotos cargadas</div>`}
+async function subirArchivos(files){
+  const vistos=new Set();
+  const seleccionados=[...files].filter(f=>{
+    const nombre=f.name.trim().toLowerCase();
+    if(nombre==='p13.jpg'||nombre==='p15.jpg')return false;
+    if(nombre.includes('n/a')||nombre.includes('n_a')||nombre.includes('n-a')||/^na\./.test(nombre))return false;
+    if(/\.(jpg|jpeg)$/i.test(nombre)===false)return false;
+    const punto=nombre.match(/^p(\d+)\.(jpg|jpeg)$/i);
+    if(!punto)return false;
+    const clave=`p${parseInt(punto[1],10)}`;
+    if(vistos.has(clave))return false;
+    vistos.add(clave);
+    return true;
+  }).sort((a,b)=>{
+    const na=parseInt(a.name.match(/^p(\d+)/i)?.[1]||'999999',10);
+    const nb=parseInt(b.name.match(/^p(\d+)/i)?.[1]||'999999',10);
+    return na-nb;
+  });
+
+  if(!seleccionados.length){alert('No hay fotos JPG válidas');return;}
+  const form=new FormData();
+  seleccionados.forEach(f=>form.append('photos',f));
+  form.append('relativePaths',JSON.stringify(seleccionados.map(f=>f.name)));
+  const r=await fetch('/api/upload-photos',{method:'POST',body:form});
+  if(!r.ok){alert('Error al cargar las fotos');return;}
+  const data=await r.json();
+  photos=data.sort((a,b)=>{
+    const na=parseInt(a.name.match(/^p(\d+)/i)?.[1]||'999999',10);
+    const nb=parseInt(b.name.match(/^p(\d+)/i)?.[1]||'999999',10);
+    return na-nb;
+  });
+  render();
+  actualizarDatosRecorrido(photos);
+}
+drop.onclick=()=>input.click();
+input.onchange=e=>subirArchivos(e.target.files);
+['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('drag')}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('drag')}));
+drop.ondrop=e=>{e.preventDefault();subirArchivos(e.dataTransfer.files);};
+async function actualizarDatosRecorrido(fotos){
+  const hoy=new Date();
+  const fechaHoy=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`;
+  document.getElementById('fecha').value=fechaHoy;
+  document.getElementById('observaciones').value=`AP-AFORO-${fechaHoy}`;
+
+  for(const foto of fotos||[]){
+    const input=await fetch('/api/analyze-photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:foto.name})});
+    if(!input.ok)continue;
+    const info=await input.json();
+    if(info.excluded)continue;
+    if(info.municipio){
+      document.getElementById('municipio').value=info.municipio;
+      const municipio=info.municipio.toUpperCase();
+      const rurales=['ABREGO','ARBOLEDAS','BOCALEMA','BUCARASICA','CACOTA','CONVENCION','CUCUTILLA','EL TARRA','LABATECA','LOS PATIOS','PAMPLONA','PAMPLONITA','RAGONVALIA','SALAZAR','SAN CALIXTO','SAN CAYETANO','SANTIAGO','SARDINATA','TEORAMA','TIBU','VILLA CARO','VILLA DEL ROSARIO'];
+      document.getElementById('clasificacion').value=rurales.some(r=>municipio.includes(r))?'RURAL':'URBANO';
+    }
+    if(info.trafo)document.getElementById('transformador').value=info.trafo;
+    if(info.ubicacion)document.getElementById('ubicacion').value=info.ubicacion;
+    const index=fotos.indexOf(foto);
+    if(index>=0){
+      const card=document.querySelectorAll('.photo')[index];
+      if(card){
+        if(info.sticker)card.querySelector('.sticker').value=info.sticker;
+        if(info.potencia)card.querySelector('.potencia').value=info.potencia;
+        if(info.farola)card.querySelector('.farola').value=info.farola;
+      }
+    }
+  }
+}
+
+function collect(){
+  const cards=[...document.querySelectorAll('.photo')];
+  return cards.map((card,i)=>{
+    const base=photos[i];
+    return {
+      photo:base.name,
+      sticker:card.querySelector('.sticker')?.value||base.sticker||'',
+      tipo:card.querySelector('.tipo')?.value||base.tecnologia||'LED',
+      potencia:card.querySelector('.potencia')?.value||base.potencia||'',
+      farola:card.querySelector('.farola')?.value||base.farola||'',
+      trafo:document.getElementById('transformador').value,
+      municipio:document.getElementById('municipio').value,
+      ubicacion:document.getElementById('ubicacion').value,
+      fecha:document.getElementById('fecha').value,
+      clasificacion:document.getElementById('clasificacion').value,
+      observaciones:document.getElementById('observaciones').value
+    };
+  });
+}
+document.getElementById('process').onclick=async()=>{
+  if(!photos.length){ alert('Carga al menos una carpeta o algunas fotos antes de procesar'); return; }
+  const boton=document.getElementById('process');
+  boton.disabled=true;
+  boton.textContent='Procesando...';
+  const controlador=new AbortController();
+  const temporizador=setTimeout(()=>controlador.abort(),15000);
+  try{
+    const respuesta=await fetch('/api/enrich',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transformador:document.getElementById('transformador').value,rows:collect()}),signal:controlador.signal});
+    clearTimeout(temporizador);
+    if(!respuesta.ok)throw new Error(`Error del servidor ${respuesta.status}`);
+    resultRows=await respuesta.json();
+    renderResults();
+    document.getElementById('results').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(error){
+    document.getElementById('results').innerHTML=`<div class="empty">No se pudo procesar: ${esc(error.name==='AbortError'?'La solicitud excedió 15 segundos':error.message)}</div>`;
+  }finally{
+    clearTimeout(temporizador);
+    boton.disabled=false;
+    boton.textContent='Procesar luminarias';
+  }
+};
+function renderResults(){document.getElementById('export').disabled=!resultRows.length;document.getElementById('results').innerHTML=`<table><thead><tr><th>Foto</th><th>Código</th><th>Tipo</th><th>Farola</th><th>Potencia</th><th>Municipio</th><th>Contrato</th><th>Estado</th></tr></thead><tbody>${resultRows.map(r=>`<tr><td>${esc(r.photo)}</td><td>${esc(r.sticker||'-')}</td><td>${esc(r.tipo)}</td><td>${esc(r.farola)}</td><td>${esc(r.potencia)}</td><td>${esc(r.municipio)}</td><td>${esc(r.contrato||'-')}</td><td><span class="badge ${r.found?'ok':'warn'}">${r.found?'Encontrada':(r.sticker?'Nueva':'Revisar')}</span></td></tr>`).join('')}</tbody></table>`}
+document.getElementById('export').onclick=async()=>{const r=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:resultRows})});const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='luminarias_gtecnology.txt';a.click();URL.revokeObjectURL(a.href)};
+
+// Cargador definitivo
+input.removeAttribute('hidden');
+input.onchange=null;
+input.addEventListener('change',async function(e){
+  const files=[...(e.target.files||[])].filter(f=>/\.(jpg|jpeg)$/i.test(f.name));
+  if(!files.length)return;
+  const form=new FormData();
+  files.forEach(f=>form.append('photos',f));
+  form.append('relativePaths',JSON.stringify(files.map(f=>f.name)));
+  const r=await fetch('/api/upload-photos',{method:'POST',body:form});
+  if(!r.ok){alert('Error al cargar fotos');return;}
+  const nuevas=await r.json();
+  photos=nuevas;
+  render();
+});
+drop.onclick=()=>input.click();
+
+render();
+const hoy=new Date();
+const fechaHoy=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`;
+document.getElementById('fecha').value=fechaHoy;
+document.getElementById('observaciones').value=`AP-AFORO-${fechaHoy}`;
+async function loadResultPopulatesFields(data){
+  actualizarFechaRecorrido();
+  const primero=(data||[]).find(x=>x && x.sticker && x.municipio);
+  if(!primero)return;
+  if(primero.municipio)document.getElementById('municipio').value=primero.municipio;
+  if(primero.trafo)document.getElementById('transformador').value=primero.trafo;
+  if(primero.ubicacion)document.getElementById('ubicacion').value=primero.ubicacion;
+  document.getElementById('clasificacion').value='URBANO';
+}
+function actualizarFechaRecorrido(){
+  const hoy=new Date();
+  const fechaHoy=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`;
+  document.getElementById('fecha').value=fechaHoy;
+  document.getElementById('observaciones').value=`AP-AFORO-${fechaHoy}`;
+}
+actualizarFechaRecorrido();
+</script>
+</body>
+</html>
+
+
+
